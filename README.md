@@ -15,6 +15,3 @@ The main features of the IoT controller:
 
 [To manage the IoT devices of this smart home system, there is a special mobile cross-platform application](https://github.com/0kmMobi/iots_manager).
 
-
-
-
