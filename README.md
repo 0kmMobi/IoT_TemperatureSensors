@@ -4,7 +4,7 @@ Temperature controller is part of smart home infrastructure.
 
 ## Description
 
-<img height="480" src="/_readmi-res/elements.png">
+<img height="320" width="750" src="/_readmi-res/elements.png">
 
 The main features of the IoT controller:
 1. Based on ESP8266/ESP32. It connects via Wifi to a router for Internet access;
