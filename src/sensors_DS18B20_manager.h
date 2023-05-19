@@ -8,7 +8,7 @@
   #include "secret_dummy.h"
 #endif
 
-class SensorsManager {
+class SensorsDS18B20Manager {
   OneWire *oneWire;
   DallasTemperature *DS18B20;
   int sensorsNumber; //Number of temperature devices found
@@ -17,12 +17,12 @@ class SensorsManager {
   float temperaturesC[ONE_WIRE_MAX_DEV];
 
 public:
-    SensorsManager() {
+    SensorsDS18B20Manager() {
       oneWire = new OneWire(PIN_ONE_WIRE_BUS);
       DS18B20 = new DallasTemperature(oneWire);
     }
 
-    ~SensorsManager() {
+    ~SensorsDS18B20Manager() {
       delete oneWire;
       delete DS18B20;
     }

@@ -21,23 +21,54 @@
   FirebaseData stream;
 
   void streamCallback(FirebaseStream data) {
-    Serial.printf("*** sream path: %s ; event path: %s ; data type: %s ; event type, %s\n",
-                  data.streamPath().c_str(),
-                  data.dataPath().c_str(),
-                  data.dataType().c_str(),
-                  data.eventType().c_str());
-    printResult(data); // see addons/RTDBHelper.h
-    Serial.println();
+    String sDataPath = data.dataPath();
+    String sDataType = data.dataType();
 
+    Serial.printf("*** sream event path: %s; data type: %s; intData: %d\n",
+                  // data.streamPath().c_str(),
+                  sDataPath.c_str(),
+                  sDataType.c_str(),
+                  // data.eventType().c_str(),
+                  data.intData());
+    printResult(data); // see addons/RTDBHelper.h
+
+    if(sDataType.equals("json")) {
+      FirebaseJson *json = data.jsonObjectPtr();
+      size_t jsonLen = json->iteratorBegin();
+      FirebaseJson::IteratorValue jsonIterValue;
+
+      for (size_t i = 0; i < jsonLen; i++) {
+        jsonIterValue = json->valueAt(i);
+        String sKey = jsonIterValue.key;
+        String sValue = jsonIterValue.value;
+        if(sKey.equals(PARAM_NAME_DURATION)) {
+          int seconds;
+          sscanf(sValue.c_str(), "%d", &seconds);
+          setDataDuration( seconds );
+        }
+      }
+      json->iteratorEnd();
+    } else {
+      String sParamName = sDataPath.substring(1);
+      if(sDataType.equals("int")) {
+        if(sParamName.equals(PARAM_NAME_DURATION)) {
+          setDataDuration( data.intData() );
+        }
+      } else if(sDataType.equals("double")) {
+        if(sParamName.equals(PARAM_NAME_PING_TS)) {
+          needToSendPong = true;
+        }
+      }
+    }
+    Serial.println();
     // This is the size of stream payload received (current and max value)
     // Max payload size is the payload size under the stream path since the stream connected
     // and read once and will not update until stream reconnection takes place.
     // This max value will be zero as no payload received in case of ESP8266 which
     // BearSSL reserved Rx buffer size is less than the actual stream payload.
-    Serial.printf("*** PING Received stream payload size: %d (Max. %d)\n\n", data.payloadLength(), data.maxPayloadLength());
-
-    needToSendPong = true;
+    //      Serial.printf("*** PING Received stream payload size: %d (Max. %d)\n\n", data.payloadLength(), data.maxPayloadLength());
   }
+
 
   void streamTimeoutCallback(bool timeout) {
     if (timeout)
@@ -64,7 +95,9 @@ class FirebaseManager {
 #if defined(ESP8266)
       stream.setBSSLBufferSize(2048 /* Rx in bytes, 512 - 16384 */, 512 /* Tx in bytes, 512 - 16384 */);
 #endif
-      String path = DB_DEVICES_IDS_TYPES + deviceMAC + "/ping_last_ts"; 
+      //String path = DB_DEVICES_IDS_TYPES + deviceMAC + "/ping_last_ts";
+      String path = DB_DEVICES_IDS_TYPES + deviceMAC + "/params";
+
       if (!Firebase.RTDB.beginStream(&stream, path))
         Serial.printf("    sream begin error, %s\n\n", stream.errorReason().c_str());
 
@@ -177,42 +210,13 @@ class FirebaseManager {
         Serial.println();
     }
 
-    // /** Not used */ 
-    // void checkIfDataPathIsExists() {
-    //     String path = DB_DEVICES_DATA + deviceMAC + "/";
-    //     Serial.printf("checkIfDataPathIsExists: Path: %s.\n", path.c_str());
-
-    //     QueryFilter query;
-    //     query.orderBy("time");
-    //     query.limitToFirst(1);
-
-    //     bool getJSONRes = Firebase.RTDB.getJSON(&fbdo, path, &query);
-    //     int resCode = fbdo.httpCode();
-    //     Serial.printf("checkIfDataPathIsExists: getJSONRes= %s: resCode= %d.\n", getJSONRes?"True":"False", resCode);
-
-    //     if (Firebase.RTDB.getJSON(&fbdo, path, &query) && fbdo.httpCode() == FIREBASE_ERROR_HTTP_CODE_OK) {
-    //       // FirebaseJson *fbJsonMain = fbdo.to<FirebaseJson *>();
-
-    //       // size_t jsonMainLen = fbJsonMain->iteratorBegin();
-    //       // FirebaseJson::IteratorValue jsonIterValue;
-
-    //       // for (size_t i = 0; i < jsonMainLen; i++) {
-    //       //   jsonIterValue = fbJsonMain->valueAt(i);
-    //       //   String sKey = jsonIterValue.key;
-    //       //   String sValue = jsonIterValue.value;
-    //       //   Serial.printf("checkIfDataPathIsExists: %s = %s\n", sKey.c_str(), sValue.c_str());
-    //       // }
-    //     } else {
-    //       // Такого пути нет. Сделаем
-    //       FirebaseJson jsonEmpty;
-    //       bool result = Firebase.RTDB.setJSON(&fbdo, path, &jsonEmpty);
-    //       Serial.printf("checkIfDataPathIsExists. Device data path creation has result: %s\n", result ? "ok" : fbdo.errorReason().c_str());
-    //     }
-    // }
-
-    void sendSensorsDataToDB(String *arrSensorsAddr, float* arrTemperatures, uint8_t sensorsNumber)  {
-        Serial.println(" Push sensors new data to DB.");
-        String path = DB_DEVICES_DATA + deviceMAC + DB_SENSOR_TEMPERATURES;
+    void sendDS18B20SensorsDataToDB(String *arrSensorsAddr, float* arrTemperatures, uint8_t sensorsNumber)  {
+        Serial.println(" Push DS18B20 sensors new data to DB.");
+        if(sensorsNumber == 0) {
+          Serial.println(" -- No temperature sensors.");
+          return;
+        }
+        String path = DB_DEVICES_DATA + deviceMAC + DB_DS18B20_TEMPERATURES;
         FirebaseJson json;
         FirebaseJson jsonTime;
         jsonTime.set(".sv", "timestamp");
@@ -225,12 +229,15 @@ class FirebaseManager {
         Serial.printf("  Push data to RTDB ... %s\n\n", result ? "ok" : fbdo.errorReason().c_str());
     }
 
+
+
+
     void checkIfNeedSendPong() {
       if(!needToSendPong)
         return;
       needToSendPong = false;
 
-      String path = DB_DEVICES_IDS_TYPES + deviceMAC + "/pong_last_ts"; 
+      String path = DB_DEVICES_IDS_TYPES + deviceMAC + "/params/" + PARAM_NAME_PONG_TS;
       FirebaseJson json;
       FirebaseJson jsonTime;
 

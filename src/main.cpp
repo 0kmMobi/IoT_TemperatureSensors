@@ -6,7 +6,8 @@
 #include "eeprom_storage.h"
 #include "wifi_station.h"
 #include "firebase_manager.h"
-#include "sensors_manager.h"
+#include "sensors_DS18B20_manager.h"
+
 
 
 const uint8_t STATE_START = 0;
@@ -25,7 +26,8 @@ WifiStation *wifiStation;
 WifiWebServer *webServer;
 
 FirebaseManager *firebaseManager;
-SensorsManager *sensorsManager;
+SensorsDS18B20Manager *sensorsDS18B20;
+
 
 uint32_t mainLoopTimer;
 
@@ -59,11 +61,11 @@ void changeState(uint8_t newState) {
   // Initializing for new state
   switch(newState) {
     case STATE_WIFI_CONNECT: {
-      wifiStation = new WifiStation();
-      wifiStation->initWiFiConnection();
       Phase tasks[] = {Phase(100, LOW), Phase(100, HIGH), Phase(100, LOW), Phase(100, HIGH), Phase(2000, LOW)};
       led = new LedBlink(PIN_LED_BUILTIN, tasks, 5, true);
       led->start();
+      wifiStation = new WifiStation();
+      wifiStation->initWiFiConnection();
       break;
     }
     case STATE_NEW_DEVICE_SERVER: {
@@ -95,10 +97,12 @@ void changeState(uint8_t newState) {
       firebaseManager = new FirebaseManager(mac);
       firebaseManager->sendDeviceInfo();
 
-      sensorsManager = new SensorsManager();
-      sensorsManager->initOnWireDS18B20();
-      String *arrStrSensorsAddr = sensorsManager->getSensorsAddresses();
-      uint8_t sensorsNumber = sensorsManager->getSensorsNumber();
+
+
+      sensorsDS18B20 = new SensorsDS18B20Manager();
+      sensorsDS18B20->initOnWireDS18B20();
+      String *arrStrSensorsAddr = sensorsDS18B20->getSensorsAddresses();
+      uint8_t sensorsNumber = sensorsDS18B20->getSensorsNumber();
       firebaseManager->sendSensorsList(arrStrSensorsAddr, sensorsNumber);
       Serial.println("After init Sensors and firebase");
 
@@ -110,37 +114,37 @@ void changeState(uint8_t newState) {
 }
 
 
+void updateSensorsDataAndSendToDB(uint32_t dt, bool hasWiFiCon) {
+  sensorsDataTimer += dt;
+  if(hasWiFiCon && sensorsDataTimer >= FREQ_MEASUREMENT_TIME_MSEC) {
+    if (Firebase.ready()) {
+      // DS18B20
+      String *arrStrSensorsAddr = sensorsDS18B20->getSensorsAddresses();
+      float* arrTemperatures = sensorsDS18B20->getTemperatures();
+      uint8_t sensorsNumber = sensorsDS18B20->getSensorsNumber();
+      firebaseManager->sendDS18B20SensorsDataToDB(arrStrSensorsAddr, arrTemperatures, sensorsNumber);
+
+
+      sensorsDataTimer -= (sensorsDataTimer/FREQ_MEASUREMENT_TIME_MSEC)*FREQ_MEASUREMENT_TIME_MSEC;
+      //sensorsDataTimer -= FREQ_MEASUREMENT_TIME_MSEC;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   Serial.println("");
 
+  bool hasWiFiPass = eepromStorage.read();
+  Serial.printf("EEPROMStorage Read result: %s\n", hasWiFiPass ? "true" : "false");
 
-  bool hasWiFiData = eepromStorage.read();
-  Serial.printf("EEPROMStorage Read result: %s\n", hasWiFiData ? "true" : "false");
-
-  if(hasWiFiData)
+  if(hasWiFiPass)
     changeState(STATE_WIFI_CONNECT);
   else
     changeState(STATE_NEW_DEVICE_SERVER);
 
   mainLoopTimer = millis();
 }
-
-
-void updateSensorsDataAndSendToDB(uint32_t dt, bool hasWiFiCon) {
-  sensorsDataTimer += dt;
-  if(hasWiFiCon && sensorsDataTimer >= FREQ_MEASUREMENT_TIME_MSEC) {
-    if (Firebase.ready()) {
-      String *arrStrSensorsAddr = sensorsManager->getSensorsAddresses();
-      float* arrTemperatures = sensorsManager->getTemperatures();
-      uint8_t sensorsNumber = sensorsManager->getSensorsNumber();
-
-      firebaseManager->sendSensorsDataToDB(arrStrSensorsAddr, arrTemperatures, sensorsNumber);
-      sensorsDataTimer -= FREQ_MEASUREMENT_TIME_MSEC;
-    }
-  }
-}
-
 
 void loop() {
   delay(10);
@@ -156,6 +160,8 @@ void loop() {
           break;
         case WIFI_CONNECTION_FAILURE: // Так никуда и не подключились. Теперь делаем web-server.
           changeState(STATE_NEW_DEVICE_SERVER);
+          break;
+        case  WIFI_CONNECTION_IN_PROGRESS:
           break;
       }
 
@@ -176,7 +182,7 @@ void loop() {
       break;
     }
     case STATE_MAIN_WORK: {
-      delay(50);
+//      delay(50);
       led->update( dt );
       bool hasWiFiCon = wifiStation->wifiCheckConnected( dt );
 
@@ -189,22 +195,8 @@ void loop() {
         eepromStorage.clear();
         ESP.reset();
       }
-
       break;
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
